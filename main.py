@@ -95,7 +95,6 @@ class Main(BoxLayout):
     def set_status(self,s): self.status=s; self.stat.text=s
     def refresh_author(self):
         self.author_bar.clear_widgets(); self.header_links.clear_widgets()
-        self.header_links.width=dp(184)
         b=Button(text="Dim304",font_size="10sp",padding=(dp(2),dp(2)))
         b.bind(on_release=lambda _b:self.open_url("https://www.drive2.ru/users/dim304"))
         self.header_links.add_widget(b)
