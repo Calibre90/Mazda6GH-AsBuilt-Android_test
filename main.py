@@ -16,6 +16,8 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.spinner import Spinner
 from kivy.uix.widget import Widget
+from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.image import Image
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.utils import platform
 from kivy.core.clipboard import Clipboard
@@ -345,13 +347,58 @@ class Main(BoxLayout):
             except Exception as ex:self.set_status("Ошибка: "+str(ex))
         save.bind(on_release=apply); pop.open()
 
+class ActivationGate(FloatLayout):
+    def __init__(self, app, **kw):
+        super().__init__(**kw)
+        self.app = app
+        self.add_widget(Image(source="assets/presplash.jpg", allow_stretch=True, keep_ratio=True, size_hint=(1,1), pos_hint={"x":0,"y":0}))
+        box=BoxLayout(orientation="vertical",spacing=dp(6),padding=dp(10),size_hint=(.88,None),height=dp(178),pos_hint={"center_x":.5,"y":.035})
+        with box.canvas.before:
+            Color(0,0,0,.82); self._bg=Rectangle(pos=box.pos,size=box.size)
+        box.bind(pos=lambda w,v:setattr(self._bg,"pos",v),size=lambda w,v:setattr(self._bg,"size",v))
+        box.add_widget(Label(text="[b]АКТИВАЦИЯ ПРИЛОЖЕНИЯ[/b]",markup=True,size_hint_y=None,height=dp(30),font_size="16sp"))
+        self.key=TextInput(hint_text="M6GH-XXXX-XXXX-XXXX",multiline=False,size_hint_y=None,height=dp(42))
+        box.add_widget(self.key)
+        b=Button(text="АКТИВИРОВАТЬ",size_hint_y=None,height=dp(42)); b.bind(on_release=self.activate); box.add_widget(b)
+        self.msg=Label(text="Lifetime • 1 устройство",size_hint_y=None,height=dp(30),font_size="11sp"); box.add_widget(self.msg)
+        self.add_widget(box)
+    def activate(self,*_):
+        if self.app.activate_license(self.key.text):
+            self.app.root.clear_widgets(); self.app.root.add_widget(Main())
+        else:
+            self.msg.text="Ошибка: неверный ключ активации"
+
 class MazdaAndroidApp(App):
     def build(self):
         self.title="Mazda6GH As-Built TEST/LITE"
         Window.softinput_mode="below_target"
         self.db=Path(self.user_data_dir)/"settings.json"
+        self.license_file=Path(self.user_data_dir)/"license.json"
         self.data=self.load_settings()
-        return Main()
+        root=FloatLayout()
+        root.add_widget(Main() if self.license_valid() else ActivationGate(self))
+        return root
+    def device_id(self):
+        try:
+            if platform=="android":
+                from jnius import autoclass
+                SettingsSecure=autoclass("android.provider.Settings$Secure")
+                act=autoclass("org.kivy.android.PythonActivity").mActivity
+                return str(SettingsSecure.getString(act.getContentResolver(),SettingsSecure.ANDROID_ID))
+        except: pass
+        return hashlib.sha256((str(Path.home())+"|mazda6gh").encode()).hexdigest()[:16]
+    def license_valid(self):
+        try:
+            d=json.loads(self.license_file.read_text(encoding="utf-8"))
+            return d.get("device")==hashlib.sha256(self.device_id().encode()).hexdigest() and d.get("type")=="lifetime"
+        except: return False
+    def activate_license(self,key):
+        # TEST gate only. Production will replace this with server verification.
+        expected=hashlib.sha256("M6GH-TEST-LIFE-2026".encode()).hexdigest()
+        if hashlib.sha256(key.strip().upper().encode()).hexdigest()!=expected:return False
+        self.license_file.parent.mkdir(parents=True,exist_ok=True)
+        self.license_file.write_text(json.dumps({"device":hashlib.sha256(self.device_id().encode()).hexdigest(),"type":"lifetime"}),encoding="utf-8")
+        return True
     def load_settings(self):
         try:
             if self.db.exists():
