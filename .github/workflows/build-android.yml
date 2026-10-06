@@ -1,0 +1,27 @@
+name: Build TEST LITE APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    container:
+      image: ghcr.io/kivy/buildozer:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify TEST/LITE source
+        run: |
+          python3 -m py_compile main.py
+          ! grep -qi '"id":"rvm"' main.py
+          ! grep -qi '"id":"keyless"' main.py
+          ! grep -qi '"id":"abs_keyless"' main.py
+          grep -q '"id":"new_feature"' main.py
+      - name: Build TEST/LITE APK
+        run: printf 'y\n' | buildozer android debug
+      - name: Upload TEST/LITE APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mazda6GH-AsBuilt-Android-TEST-LITE
+          path: bin/*.apk
+          if-no-files-found: error
