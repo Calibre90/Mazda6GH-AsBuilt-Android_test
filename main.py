@@ -95,9 +95,13 @@ class Main(BoxLayout):
     def set_status(self,s): self.status=s; self.stat.text=s
     def refresh_author(self):
         self.author_bar.clear_widgets(); self.header_links.clear_widgets()
+        self.header_links.width=dp(184)
         b=Button(text="Dim304",font_size="10sp",padding=(dp(2),dp(2)))
         b.bind(on_release=lambda _b:self.open_url("https://www.drive2.ru/users/dim304"))
         self.header_links.add_widget(b)
+        b2=Button(text="Wolis11",font_size="10sp",padding=(dp(2),dp(2)))
+        b2.bind(on_release=lambda _b:self.open_url("https://www.drive2.ru/users/wolis11/"))
+        self.header_links.add_widget(b2)
     def open_url(self,url):
         if not url:return
         try:
