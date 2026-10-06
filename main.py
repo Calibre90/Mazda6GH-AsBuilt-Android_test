@@ -1,4 +1,4 @@
-import json, re, hashlib, os
+import json, re, hashlib, os, base64
 from pathlib import Path
 from kivy.app import App
 from kivy.core.window import Window
@@ -357,6 +357,10 @@ class ActivationGate(FloatLayout):
             Color(0,0,0,.82); self._bg=Rectangle(pos=box.pos,size=box.size)
         box.bind(pos=lambda w,v:setattr(self._bg,"pos",v),size=lambda w,v:setattr(self._bg,"size",v))
         box.add_widget(Label(text="[b]АКТИВАЦИЯ ПРИЛОЖЕНИЯ[/b]",markup=True,size_hint_y=None,height=dp(30),font_size="16sp"))
+        did=self.app.device_code()
+        self.did_label=Label(text="ID устройства: "+did,size_hint_y=None,height=dp(28),font_size="11sp")
+        box.height=dp(210)
+        box.add_widget(self.did_label)
         self.key=TextInput(hint_text="M6GH-XXXX-XXXX-XXXX",multiline=False,size_hint_y=None,height=dp(42))
         box.add_widget(self.key)
         b=Button(text="АКТИВИРОВАТЬ",size_hint_y=None,height=dp(42)); b.bind(on_release=self.activate); box.add_widget(b)
@@ -366,7 +370,7 @@ class ActivationGate(FloatLayout):
         if self.app.activate_license(self.key.text):
             self.app.root.clear_widgets(); self.app.root.add_widget(Main())
         else:
-            self.msg.text="Ошибка: неверный ключ активации"
+            self.msg.text="Ошибка: ключ не подходит к этому устройству"
 
 class MazdaAndroidApp(App):
     def build(self):
@@ -387,17 +391,44 @@ class MazdaAndroidApp(App):
                 return str(SettingsSecure.getString(act.getContentResolver(),SettingsSecure.ANDROID_ID))
         except: pass
         return hashlib.sha256((str(Path.home())+"|mazda6gh").encode()).hexdigest()[:16]
+    LICENSE_RSA_N=22897850110165479825680995577721290122391823394630626176170111188764037141123878313815120021529240648323770495515335618144032987098481750634173307456120930392553237006620098104782347404544401205497540181379188699302887052366343956144279223087185854554602530830155438130371439321240827047980681867111820062146223339388062495317239942568733126800123852940314315834055028526919829089504532578078310325426160749116110783886248472548764970653847483552315841711806453438173136231745266860376266111319290179289950584808084717762232771424562611529530479498258413489313028860419197806862097640430647862703837233534576269559197
+    LICENSE_RSA_E=65537
+    def device_code(self):
+        return hashlib.sha256(("M6GH|"+self.device_id()).encode()).hexdigest().upper()[:16]
+    def _b64d(self,s):
+        return base64.urlsafe_b64decode(s+"="*((4-len(s)%4)%4))
+    def _verify_signature(self,payload,signature):
+        try:
+            sig=self._b64d(signature)
+            k=(self.LICENSE_RSA_N.bit_length()+7)//8
+            if len(sig)!=k:return False
+            em=pow(int.from_bytes(sig,"big"),self.LICENSE_RSA_E,self.LICENSE_RSA_N).to_bytes(k,"big")
+            digest=hashlib.sha256(payload.encode("ascii")).digest()
+            prefix=bytes.fromhex("3031300d060960864801650304020105000420")
+            expected=b"\\x00\\x01"+b"\\xff"*(k-len(prefix)-len(digest)-3)+b"\\x00"+prefix+digest
+            return em==expected
+        except:return False
+    def _decode_license(self,key):
+        try:
+            compact="".join(key.strip().split())
+            if not compact.startswith("M6L1."):return None
+            _,payload,sig=compact.split(".",2)
+            if not self._verify_signature(payload,sig):return None
+            data=json.loads(self._b64d(payload).decode("utf-8"))
+            if data.get("v")!=1 or data.get("type")!="lifetime":return None
+            if data.get("device")!=self.device_code():return None
+            return data
+        except:return None
     def license_valid(self):
         try:
             d=json.loads(self.license_file.read_text(encoding="utf-8"))
-            return d.get("device")==hashlib.sha256(self.device_id().encode()).hexdigest() and d.get("type")=="lifetime"
-        except: return False
+            return self._decode_license(d.get("license","")) is not None
+        except:return False
     def activate_license(self,key):
-        # TEST gate only. Production will replace this with server verification.
-        expected=hashlib.sha256("M6GH-TEST-LIFE-2026".encode()).hexdigest()
-        if hashlib.sha256(key.strip().upper().encode()).hexdigest()!=expected:return False
+        data=self._decode_license(key)
+        if not data:return False
         self.license_file.parent.mkdir(parents=True,exist_ok=True)
-        self.license_file.write_text(json.dumps({"device":hashlib.sha256(self.device_id().encode()).hexdigest(),"type":"lifetime"}),encoding="utf-8")
+        self.license_file.write_text(json.dumps({"license":"".join(key.strip().split()),"type":"lifetime"},ensure_ascii=False),encoding="utf-8")
         return True
     def load_settings(self):
         try:
