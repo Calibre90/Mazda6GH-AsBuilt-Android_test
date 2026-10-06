@@ -6,13 +6,13 @@ source.dir = .
 source.include_exts = py,png,jpg,jpeg,json,abt,txt,kv
 icon.filename = %(source.dir)s/assets/icon.jpg
 presplash.filename = %(source.dir)s/assets/presplash.jpg
-version = 0.2
+version = 0.3
 requirements = python3,kivy,pyjnius
 orientation = portrait
 fullscreen = 0
 android.api = 35
-android.minapi = 26
-android.archs = arm64-v8a
+android.minapi = 29
+android.archs = arm64-v8a, armeabi-v7a
 android.accept_sdk_license = True
 
 [buildozer]
