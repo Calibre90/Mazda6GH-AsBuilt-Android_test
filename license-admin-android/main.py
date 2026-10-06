@@ -11,8 +11,6 @@ from kivy.uix.scrollview import ScrollView
 from kivy.core.clipboard import Clipboard
 from kivy.utils import platform
 
-# PRIVATE OWNER APP. Private RSA key is loaded from app-private storage/import,
-# never committed to the public repository.
 class LicenseAdmin(App):
     def build(self):
         self.title="Mazda6GH License Admin"
@@ -24,53 +22,58 @@ class LicenseAdmin(App):
         self.device=TextInput(hint_text="Device ID (16 HEX)",multiline=False,size_hint_y=None,height=dp(44))
         self.customer=TextInput(hint_text="Покупатель / имя",multiline=False,size_hint_y=None,height=dp(44))
         self.note=TextInput(hint_text="Примечание",multiline=False,size_hint_y=None,height=dp(44))
-        root.add_widget(self.device); root.add_widget(self.customer); root.add_widget(self.note)
-        b=Button(text="СОЗДАТЬ LIFETIME",size_hint_y=None,height=dp(48)); b.bind(on_release=self.generate); root.add_widget(b)
-        self.out=TextInput(readonly=True,hint_text="Здесь появится Lifetime ключ",size_hint_y=None,height=dp(130))
-        root.add_widget(self.out)
+        root.add_widget(self.device);root.add_widget(self.customer);root.add_widget(self.note)
+        b=Button(text="СОЗДАТЬ LIFETIME",size_hint_y=None,height=dp(48));b.bind(on_release=self.generate);root.add_widget(b)
+        self.out=TextInput(readonly=True,hint_text="Здесь появится Lifetime ключ",size_hint_y=None,height=dp(130));root.add_widget(self.out)
         row=BoxLayout(size_hint_y=None,height=dp(44),spacing=dp(5))
-        cp=Button(text="КОПИРОВАТЬ"); cp.bind(on_release=lambda *_:Clipboard.copy(self.out.text))
-        vr=Button(text="ПРОВЕРИТЬ"); vr.bind(on_release=self.verify_format)
+        cp=Button(text="КОПИРОВАТЬ");cp.bind(on_release=lambda *_:Clipboard.copy(self.out.text))
+        vr=Button(text="ПРОВЕРИТЬ");vr.bind(on_release=self.verify_format)
         row.add_widget(cp);row.add_widget(vr);root.add_widget(row)
-        self.status=Label(text="Приватный ключ: "+("установлен" if self.keyfile.exists() else "НЕ УСТАНОВЛЕН"),size_hint_y=None,height=dp(34),font_size="11sp")
-        root.add_widget(self.status)
+        self.status=Label(text="Приватный ключ: "+("установлен" if self.keyfile.exists() else "НЕ УСТАНОВЛЕН"),size_hint_y=None,height=dp(34),font_size="11sp");root.add_widget(self.status)
         self.history=Label(text=self.history_text(),markup=True,size_hint_y=None)
         self.history.bind(texture_size=lambda w,s:setattr(w,"height",s[1]))
-        sc=ScrollView(); sc.add_widget(self.history); root.add_widget(sc)
+        sc=ScrollView();sc.add_widget(self.history);root.add_widget(sc)
         return root
-    def b64(self,b): return base64.urlsafe_b64encode(b).decode().rstrip("=")
+    def b64(self,b):return base64.urlsafe_b64encode(b).decode().rstrip("=")
     def normalize_device(self,s):
         d="".join(ch for ch in s.upper() if ch in "0123456789ABCDEF")
-        if len(d)!=16: raise ValueError("Device ID должен содержать 16 HEX-символов")
+        if len(d)!=16:raise ValueError("Device ID должен содержать 16 HEX-символов")
         return d
-    def load_private(self):
-        if not self.keyfile.exists(): raise ValueError("Приватный мастер-ключ не установлен")
-        from cryptography.hazmat.primitives import serialization
-        return serialization.load_pem_private_key(self.keyfile.read_bytes(),password=None)
+    def _java_sign(self,message):
+        if platform!="android":raise ValueError("Подпись доступна только в Android Admin")
+        if not self.keyfile.exists():raise ValueError("Приватный мастер-ключ не установлен")
+        from jnius import autoclass
+        Base64=autoclass("android.util.Base64")
+        KeyFactory=autoclass("java.security.KeyFactory")
+        Signature=autoclass("java.security.Signature")
+        PKCS8=autoclass("java.security.spec.PKCS8EncodedKeySpec")
+        pem=self.keyfile.read_text(encoding="ascii")
+        body="".join(x.strip() for x in pem.splitlines() if not x.startswith("-----"))
+        raw=Base64.decode(body,Base64.DEFAULT)
+        private=KeyFactory.getInstance("RSA").generatePrivate(PKCS8(raw))
+        signer=Signature.getInstance("SHA256withRSA")
+        signer.initSign(private)
+        signer.update(message.encode("ascii"))
+        return bytes(signer.sign())
     def generate(self,*_):
         try:
-            from cryptography.hazmat.primitives import hashes
-            from cryptography.hazmat.primitives.asymmetric import padding
             dev=self.normalize_device(self.device.text)
             payload={"device":dev,"type":"lifetime","v":1}
             p=self.b64(json.dumps(payload,separators=(",",":"),sort_keys=True).encode())
-            sig=self.load_private().sign(p.encode("ascii"),padding.PKCS1v15(),hashes.SHA256())
-            code="M6L1."+p+"."+self.b64(sig)
+            code="M6L1."+p+"."+self.b64(self._java_sign(p))
             self.out.text=code
             new=not self.logfile.exists()
             with self.logfile.open("a",newline="",encoding="utf-8-sig") as f:
                 w=csv.writer(f)
                 if new:w.writerow(["created_utc","device_id","customer","note","license"])
                 w.writerow([datetime.now(timezone.utc).isoformat(),dev,self.customer.text.strip(),self.note.text.strip(),code])
-            self.status.text="Lifetime создан и записан в журнал"
-            self.history.text=self.history_text()
+            self.status.text="Lifetime создан и записан в журнал";self.history.text=self.history_text()
         except Exception as e:self.status.text="Ошибка: "+str(e)
     def verify_format(self,*_):
         try:
-            code="".join(self.out.text.split()); parts=code.split(".")
+            code="".join(self.out.text.split());parts=code.split(".")
             if len(parts)!=3 or parts[0]!="M6L1":raise ValueError("Неверный формат")
-            pad="="*((4-len(parts[1])%4)%4)
-            d=json.loads(base64.urlsafe_b64decode(parts[1]+pad))
+            pad="="*((4-len(parts[1])%4)%4);d=json.loads(base64.urlsafe_b64decode(parts[1]+pad))
             self.status.text=f"Ключ: {d.get('type')} • Device {d.get('device')}"
         except Exception as e:self.status.text="Ошибка ключа: "+str(e)
     def history_text(self):
@@ -80,4 +83,4 @@ class LicenseAdmin(App):
             return "[b]Последние лицензии:[/b]\n"+"\n".join(f"{r['created_utc'][:10]}  {r['device_id']}  {r['customer']}" for r in rows)
         except:return "[b]История:[/b] ошибка чтения"
 
-if __name__=="__main__": LicenseAdmin().run()
+if __name__=="__main__":LicenseAdmin().run()
