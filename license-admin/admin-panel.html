@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mazda6GH License Admin</title><style>body{font-family:Arial;background:#111;color:#eee;margin:0;padding:20px}.card{max-width:900px;margin:auto;background:#1c1c1c;padding:18px;border-radius:14px}button,input{padding:12px;margin:5px;border-radius:8px;border:0}button{cursor:pointer}table{width:100%;border-collapse:collapse;margin-top:15px}td,th{padding:9px;border-bottom:1px solid #444;text-align:left}.ok{color:#6f6}.free{color:#fc6}</style></head>
+<body><div class="card"><h2>Mazda6GH — License Admin</h2><p>Lifetime • 1 ключ = 1 устройство</p>
+<button onclick="createKey()">Создать Lifetime ключ</button><button onclick="exportKeys()">Экспорт</button>
+<table><thead><tr><th>Ключ</th><th>Статус</th><th>Устройство</th><th>Действие</th></tr></thead><tbody id="rows"></tbody></table></div>
+<script>
+const alphabet="ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+function part(){let s="";crypto.getRandomValues(new Uint32Array(4)).forEach(v=>s+=alphabet[v%alphabet.length]);return s}
+function load(){return JSON.parse(localStorage.getItem("m6gh_keys")||"[]")}
+function save(x){localStorage.setItem("m6gh_keys",JSON.stringify(x));render()}
+function createKey(){let a=load();a.unshift({key:"M6GH-"+part()+"-"+part()+"-"+part(),status:"FREE",device:"",type:"LIFETIME"});save(a)}
+function reset(i){let a=load();a[i].status="FREE";a[i].device="";save(a)}
+function render(){let a=load();rows.innerHTML=a.map((x,i)=>`<tr><td><b>${x.key}</b></td><td class="${x.status==="FREE"?"free":"ok"}">${x.status}</td><td>${x.device||"—"}</td><td><button onclick="reset(${i})">Сбросить</button></td></tr>`).join("")}
+function exportKeys(){let b=new Blob([JSON.stringify(load(),null,2)],{type:"application/json"});let u=URL.createObjectURL(b);let a=document.createElement("a");a.href=u;a.download="mazda6gh-licenses.json";a.click();URL.revokeObjectURL(u)}
+render()</script></body></html>
