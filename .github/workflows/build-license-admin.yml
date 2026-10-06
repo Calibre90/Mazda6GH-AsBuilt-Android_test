@@ -1,0 +1,29 @@
+name: Build License Admin APK
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'license-admin-android/**'
+      - '.github/workflows/build-license-admin.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev
+          pip install buildozer cython==0.29.36
+      - name: Build Admin APK
+        working-directory: license-admin-android
+        run: buildozer android debug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Mazda6GH-License-Admin
+          path: license-admin-android/bin/*.apk
