@@ -10,6 +10,14 @@ jobs:
       image: ghcr.io/kivy/buildozer:latest
     steps:
       - uses: actions/checkout@v4
+      - name: Restore app artwork
+        run: |
+          mkdir -p assets
+          base64 -d assets_encoded/icon.jpg.b64 > assets/icon.jpg
+          base64 -d assets_encoded/presplash.jpg.b64 > assets/presplash.jpg
+          test -s assets/icon.jpg
+          test -s assets/presplash.jpg
+          file assets/icon.jpg assets/presplash.jpg
       - name: Verify TEST/LITE source
         run: |
           python3 -m py_compile main.py
