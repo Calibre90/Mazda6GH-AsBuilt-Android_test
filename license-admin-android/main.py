@@ -41,8 +41,9 @@ class LicenseAdmin(App):
             root.add_widget(install)
         b=Button(text="СОЗДАТЬ LIFETIME",size_hint_y=None,height=dp(48));b.bind(on_release=self.generate);root.add_widget(b)
         self.out=TextInput(readonly=True,hint_text="Здесь появится Lifetime ключ",size_hint_y=None,height=dp(130));root.add_widget(self.out)
+        self.out.bind(on_touch_up=self.clear_output_selection)
         row=BoxLayout(size_hint_y=None,height=dp(44),spacing=dp(5))
-        cp=Button(text="КОПИРОВАТЬ");cp.bind(on_release=lambda *_:Clipboard.copy(self.out.text))
+        cp=Button(text="КОПИРОВАТЬ");cp.bind(on_release=lambda *_:self.copy_license(self.out.text))
         vr=Button(text="ПРОВЕРИТЬ");vr.bind(on_release=self.verify_format)
         row.add_widget(cp);row.add_widget(vr);root.add_widget(row)
         self.status=Label(text="Приватный ключ: "+("установлен" if self.keyfile.exists() else "НЕ УСТАНОВЛЕН"),size_hint_y=None,height=dp(34),font_size="11sp");root.add_widget(self.status)
@@ -76,6 +77,40 @@ class LicenseAdmin(App):
         journal_screen.add_widget(panel)
         self.manager.add_widget(main);self.manager.add_widget(journal_screen)
         return self.manager
+    def clear_output_selection(self,widget,touch):
+        if widget.collide_point(*touch.pos):
+            Clock.schedule_once(lambda dt:self._reset_output_selection(),0.1)
+        return False
+    def _reset_output_selection(self):
+        try:
+            self.out.cancel_selection()
+            self.out.select_text(0,0)
+            self.out.focus=False
+        except Exception:
+            pass
+    def copy_license(self,code):
+        code="".join(str(code).split())
+        if not code:
+            self.status.text="Нет лицензии для копирования"
+            return
+        try:
+            if platform=="android":
+                from jnius import autoclass
+                activity=autoclass("org.kivy.android.PythonActivity").mActivity
+                Context=autoclass("android.content.Context")
+                ClipData=autoclass("android.content.ClipData")
+                manager=activity.getSystemService(Context.CLIPBOARD_SERVICE)
+                manager.setPrimaryClip(ClipData.newPlainText("Mazda6GH License",code))
+            else:
+                Clipboard.copy(code)
+            self.status.text="Лицензия скопирована"
+            if self.manager.current=="journal":
+                self.journal_count.text="Лицензия скопирована в буфер обмена"
+            self._reset_output_selection()
+        except Exception as e:
+            self.status.text="Ошибка копирования: "+str(e)
+            if self.manager.current=="journal":
+                self.journal_count.text="Ошибка копирования: "+str(e)
     def on_android_back(self,window,key,*args):
         if key==27 and self.manager.current=="journal":
             self.manager.current="main"
@@ -125,10 +160,9 @@ class LicenseAdmin(App):
             stream=activity.getContentResolver().openOutputStream(intent.getData())
             try:
                 payload=self._export_file.read_bytes()
-                signed=autoclass("java.lang.Byte").TYPE
-                from jnius import jarray
-                chunk=jarray("b")(list((x if x<128 else x-256) for x in payload))
-                stream.write(chunk)
+                # Write through Android OutputStream; avoid unsupported jnius.jarray import.
+                for value in payload:
+                    stream.write(int(value))
                 stream.flush()
             finally:
                 stream.close()
@@ -139,6 +173,7 @@ class LicenseAdmin(App):
 
     def open_journal(self,*_):
         self.refresh_journal()
+        self._reset_output_selection()
         self.manager.current="journal"
     def read_journal(self):
         if not self.logfile.exists():return []
@@ -165,7 +200,7 @@ class LicenseAdmin(App):
                 card.add_widget(summary)
                 copy=Button(text="КОПИРОВАТЬ ЛИЦЕНЗИЮ",size_hint_y=None,height=dp(45))
                 license_code=str(r.get("license",""))
-                copy.bind(on_release=lambda _,code=license_code:Clipboard.copy(code))
+                copy.bind(on_release=lambda _,code=license_code:self.copy_license(code))
                 card.add_widget(copy)
                 self.journal_rows.add_widget(card)
         except Exception as e:
