@@ -2,7 +2,7 @@ name: Build License Admin APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, fix-license-admin-pem-import ]
     paths:
       - 'license-admin-android/**'
       - '.github/workflows/build-license-admin.yml'
