@@ -85,7 +85,7 @@ class LicenseAdmin(App):
                     lines.append(str(line))
             finally:
                 reader.close()
-            pem="\\n".join(lines).strip()
+            pem="\n".join(lines).strip()
             if len(pem)>16384:raise ValueError("Слишком большой PEM")
             self.pem_input.text=pem
             Clock.schedule_once(lambda dt:self.install_private_key(),0)
@@ -104,7 +104,7 @@ class LicenseAdmin(App):
             body="".join(line.strip() for line in pem.splitlines() if not line.startswith("-----"))
             raw=Base64.decode(body,Base64.DEFAULT)
             KeyFactory.getInstance("RSA").generatePrivate(PKCS8(raw))
-            self.keyfile.write_text(pem+"\\n",encoding="ascii")
+            self.keyfile.write_text(pem+"\n",encoding="ascii")
             self.pem_input.text=""
             self.status.text="Приватный RSA-ключ установлен. Можно выдавать лицензии."
         except Exception as e:
