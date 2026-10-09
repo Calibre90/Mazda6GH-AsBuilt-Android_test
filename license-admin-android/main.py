@@ -87,10 +87,16 @@ class LicenseAdmin(App):
                 reader.close()
             pem="\n".join(lines).strip()
             if len(pem)>16384:raise ValueError("Слишком большой PEM")
-            self.pem_input.text=pem
-            Clock.schedule_once(lambda dt:self.install_private_key(),0)
+            # Android activity callbacks may run outside Kivy's UI thread.
+            # Never assign widget properties from this callback.
+            Clock.schedule_once(lambda dt,pem=pem:self._apply_selected_pem(pem),0)
         except Exception as e:
-            self.status.text="Ошибка чтения PEM: "+str(e)
+            error=str(e)
+            Clock.schedule_once(lambda dt,error=error:setattr(self.status,"text","Ошибка чтения PEM: "+error),0)
+
+    def _apply_selected_pem(self,pem):
+        self.pem_input.text=pem
+        self.install_private_key()
 
     def install_private_key(self,*_):
         try:
