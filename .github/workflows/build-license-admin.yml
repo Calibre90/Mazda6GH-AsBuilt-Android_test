@@ -20,6 +20,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y git zip unzip openjdk-17-jdk autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev cmake libffi-dev libssl-dev
           pip install buildozer cython==0.29.36
+      - name: Work around obsolete libffi autoconf macro
+        run: |
+          mkdir -p "$RUNNER_TEMP/build-tools"
+          cat > "$RUNNER_TEMP/build-tools/autoreconf" <<'SCRIPT'
+          #!/usr/bin/env bash
+          if [[ -f configure.ac ]] && grep -q 'LT_SYS_SYMBOL_USCORE' configure.ac; then
+            sed -i 's/LT_SYS_SYMBOL_USCORE/AC_MSG_NOTICE([legacy libtool symbol macro omitted])/g' configure.ac
+          fi
+          exec /usr/bin/autoreconf "$@"
+          SCRIPT
+          chmod +x "$RUNNER_TEMP/build-tools/autoreconf"
+          echo "$RUNNER_TEMP/build-tools" >> "$GITHUB_PATH"
       - name: Build Admin APK
         working-directory: license-admin-android
         run: buildozer android debug
