@@ -11,6 +11,9 @@ from kivy.uix.scrollview import ScrollView
 from kivy.core.clipboard import Clipboard
 from kivy.utils import platform
 from kivy.clock import Clock
+from kivy.uix.screenmanager import ScreenManager, Screen
+from kivy.uix.gridlayout import GridLayout
+from kivy.utils import escape_markup
 
 class LicenseAdmin(App):
     def build(self):
@@ -21,8 +24,8 @@ class LicenseAdmin(App):
         root=BoxLayout(orientation="vertical",padding=dp(10),spacing=dp(7))
         root.add_widget(Label(text="[b]Mazda6GH LICENSE ADMIN[/b]",markup=True,size_hint_y=None,height=dp(42),font_size="18sp"))
         self.device=TextInput(hint_text="Device ID (16 HEX)",multiline=False,size_hint_y=None,height=dp(44))
-        self.customer=TextInput(hint_text="Покупатель / имя",multiline=False,size_hint_y=None,height=dp(44))
-        self.note=TextInput(hint_text="Примечание",multiline=False,size_hint_y=None,height=dp(44))
+        self.customer=TextInput(hint_text="Email покупателя",multiline=False,size_hint_y=None,height=dp(44))
+        self.note=TextInput(hint_text="Примечание / имя",multiline=False,size_hint_y=None,height=dp(44))
         root.add_widget(self.device);root.add_widget(self.customer);root.add_widget(self.note)
         # Owner-only setup: select PEM from Android files or paste manually.
         if not self.keyfile.exists():
@@ -41,10 +44,64 @@ class LicenseAdmin(App):
         vr=Button(text="ПРОВЕРИТЬ");vr.bind(on_release=self.verify_format)
         row.add_widget(cp);row.add_widget(vr);root.add_widget(row)
         self.status=Label(text="Приватный ключ: "+("установлен" if self.keyfile.exists() else "НЕ УСТАНОВЛЕН"),size_hint_y=None,height=dp(34),font_size="11sp");root.add_widget(self.status)
-        self.history=Label(text=self.history_text(),markup=True,size_hint_y=None)
-        self.history.bind(texture_size=lambda w,s:setattr(w,"height",s[1]))
-        sc=ScrollView();sc.add_widget(self.history);root.add_widget(sc)
-        return root
+        journal=Button(text="ЖУРНАЛ ЛИЦЕНЗИЙ",size_hint_y=None,height=dp(48))
+        journal.bind(on_release=self.open_journal)
+        root.add_widget(journal)
+        self.manager=ScreenManager()
+        main=Screen(name="main");main.add_widget(root)
+        journal_screen=Screen(name="journal")
+        panel=BoxLayout(orientation="vertical",padding=dp(10),spacing=dp(8))
+        head=BoxLayout(size_hint_y=None,height=dp(48),spacing=dp(8))
+        back=Button(text="НАЗАД",size_hint_x=.28)
+        back.bind(on_release=lambda *_:setattr(self.manager,"current","main"))
+        head.add_widget(back)
+        head.add_widget(Label(text="[b]ЖУРНАЛ ЛИЦЕНЗИЙ[/b]",markup=True))
+        panel.add_widget(head)
+        self.search=TextInput(hint_text="Поиск: email, имя, Device ID, ключ",multiline=False,size_hint_y=None,height=dp(48))
+        self.search.bind(text=lambda *_:self.refresh_journal())
+        panel.add_widget(self.search)
+        self.journal_count=Label(size_hint_y=None,height=dp(30),font_size="13sp")
+        panel.add_widget(self.journal_count)
+        sc=ScrollView(do_scroll_x=False)
+        self.journal_rows=GridLayout(cols=1,spacing=dp(7),size_hint_y=None)
+        self.journal_rows.bind(minimum_height=self.journal_rows.setter("height"))
+        sc.add_widget(self.journal_rows);panel.add_widget(sc)
+        journal_screen.add_widget(panel)
+        self.manager.add_widget(main);self.manager.add_widget(journal_screen)
+        return self.manager
+    def open_journal(self,*_):
+        self.refresh_journal()
+        self.manager.current="journal"
+    def read_journal(self):
+        if not self.logfile.exists():return []
+        with self.logfile.open("r",newline="",encoding="utf-8-sig") as f:
+            return list(csv.DictReader(f))
+    def refresh_journal(self):
+        self.journal_rows.clear_widgets()
+        try:
+            rows=self.read_journal()
+            query=self.search.text.strip().casefold()
+            if query:
+                rows=[r for r in rows if any(query in str(r.get(k,"")).casefold() for k in ("created_utc","device_id","customer","note","license"))]
+            self.journal_count.text=f"Найдено: {len(rows)}"
+            if not rows:
+                self.journal_rows.add_widget(Label(text="Записей нет",size_hint_y=None,height=dp(60)))
+            for r in reversed(rows):
+                card=BoxLayout(orientation="vertical",size_hint_y=None,height=dp(172),spacing=dp(3))
+                date=str(r.get("created_utc",""))[:19].replace("T"," ")
+                mail=escape_markup(str(r.get("customer","")))
+                note=escape_markup(str(r.get("note","")))
+                dev=escape_markup(str(r.get("device_id","")))
+                summary=Label(text=f"[b]{mail}[/b]\\n{note}\\nDevice ID: {dev}\\nДата (UTC): {date}",markup=True,halign="left",valign="middle",size_hint_y=None,height=dp(118))
+                summary.bind(size=lambda w,_:setattr(w,"text_size",(w.width,None)))
+                card.add_widget(summary)
+                copy=Button(text="КОПИРОВАТЬ ЛИЦЕНЗИЮ",size_hint_y=None,height=dp(45))
+                license_code=str(r.get("license",""))
+                copy.bind(on_release=lambda _,code=license_code:Clipboard.copy(code))
+                card.add_widget(copy)
+                self.journal_rows.add_widget(card)
+        except Exception as e:
+            self.journal_count.text="Ошибка чтения журнала: "+str(e)
     def choose_pem_file(self,*_):
         if platform!="android":
             self.status.text="Выбор файла доступен на Android"
@@ -154,7 +211,7 @@ class LicenseAdmin(App):
                 w=csv.writer(f)
                 if new:w.writerow(["created_utc","device_id","customer","note","license"])
                 w.writerow([datetime.now(timezone.utc).isoformat(),dev,self.customer.text.strip(),self.note.text.strip(),code])
-            self.status.text="Lifetime создан и записан в журнал";self.history.text=self.history_text()
+            self.status.text="Lifetime создан и записан в журнал"
         except Exception as e:self.status.text="Ошибка: "+str(e)
     def verify_format(self,*_):
         try:
