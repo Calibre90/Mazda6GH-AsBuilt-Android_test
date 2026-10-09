@@ -10,6 +10,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.scrollview import ScrollView
 from kivy.core.clipboard import Clipboard
 from kivy.utils import platform
+from kivy.clock import Clock
 
 class LicenseAdmin(App):
     def build(self):
@@ -23,10 +24,13 @@ class LicenseAdmin(App):
         self.customer=TextInput(hint_text="Покупатель / имя",multiline=False,size_hint_y=None,height=dp(44))
         self.note=TextInput(hint_text="Примечание",multiline=False,size_hint_y=None,height=dp(44))
         root.add_widget(self.device);root.add_widget(self.customer);root.add_widget(self.note)
-        # Owner-only setup: paste the PEM into this app locally, never into GitHub.
+        # Owner-only setup: select PEM from Android files or paste manually.
         if not self.keyfile.exists():
             self.pem_input=TextInput(hint_text="Вставьте приватный ключ PEM (только один раз)",multiline=True,size_hint_y=None,height=dp(95))
             root.add_widget(self.pem_input)
+            choose=Button(text="ВЫБРАТЬ ФАЙЛ PEM",size_hint_y=None,height=dp(44))
+            choose.bind(on_release=self.choose_pem_file)
+            root.add_widget(choose)
             install=Button(text="УСТАНОВИТЬ ПРИВАТНЫЙ КЛЮЧ",size_hint_y=None,height=dp(44))
             install.bind(on_release=self.install_private_key)
             root.add_widget(install)
@@ -41,6 +45,53 @@ class LicenseAdmin(App):
         self.history.bind(texture_size=lambda w,s:setattr(w,"height",s[1]))
         sc=ScrollView();sc.add_widget(self.history);root.add_widget(sc)
         return root
+    def choose_pem_file(self,*_):
+        if platform!="android":
+            self.status.text="Выбор файла доступен на Android"
+            return
+        try:
+            from jnius import autoclass
+            PythonActivity=autoclass("org.kivy.android.PythonActivity")
+            Intent=autoclass("android.content.Intent")
+            self._pem_request_code=8421
+            activity=PythonActivity.mActivity
+            from android import activity as android_activity
+            android_activity.bind(on_activity_result=self._pem_file_result)
+            intent=Intent(Intent.ACTION_OPEN_DOCUMENT)
+            intent.addCategory(Intent.CATEGORY_OPENABLE)
+            intent.setType("*/*")
+            activity.startActivityForResult(intent,self._pem_request_code)
+        except Exception as e:
+            self.status.text="Ошибка выбора файла: "+str(e)
+
+    def _pem_file_result(self,request_code,result_code,intent):
+        if request_code!=getattr(self,"_pem_request_code",8421):return
+        try:
+            from android import activity as android_activity
+            android_activity.unbind(on_activity_result=self._pem_file_result)
+            if result_code!= -1 or intent is None:return
+            uri=intent.getData()
+            from jnius import autoclass
+            PythonActivity=autoclass("org.kivy.android.PythonActivity")
+            InputStreamReader=autoclass("java.io.InputStreamReader")
+            BufferedReader=autoclass("java.io.BufferedReader")
+            stream=PythonActivity.mActivity.getContentResolver().openInputStream(uri)
+            reader=BufferedReader(InputStreamReader(stream,"UTF-8"))
+            lines=[]
+            try:
+                while len(lines)<100:
+                    line=reader.readLine()
+                    if line is None:break
+                    lines.append(str(line))
+            finally:
+                reader.close()
+            pem="\\n".join(lines).strip()
+            if len(pem)>16384:raise ValueError("Слишком большой PEM")
+            self.pem_input.text=pem
+            Clock.schedule_once(lambda dt:self.install_private_key(),0)
+        except Exception as e:
+            self.status.text="Ошибка чтения PEM: "+str(e)
+
     def install_private_key(self,*_):
         try:
             pem=self.pem_input.text.strip()
