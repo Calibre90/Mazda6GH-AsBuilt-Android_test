@@ -26,7 +26,7 @@ class LicenseAdmin(App):
         root.add_widget(self.device);root.add_widget(self.customer);root.add_widget(self.note)
         # Owner-only setup: select PEM from Android files or paste manually.
         if not self.keyfile.exists():
-            self.pem_input=TextInput(hint_text="Вставьте приватный ключ PEM (только один раз)",multiline=True,size_hint_y=None,height=dp(95))
+            self.pem_input=TextInput(hint_text="Вставьте весь текст PEM здесь или выберите файл ниже",multiline=True,size_hint_y=None,height=dp(125))
             root.add_widget(self.pem_input)
             choose=Button(text="ВЫБРАТЬ ФАЙЛ PEM",size_hint_y=None,height=dp(44))
             choose.bind(on_release=self.choose_pem_file)
@@ -62,7 +62,8 @@ class LicenseAdmin(App):
             intent.setType("*/*")
             activity.startActivityForResult(intent,self._pem_request_code)
         except Exception as e:
-            self.status.text="Ошибка выбора файла: "+str(e)
+            error=str(e)
+            Clock.schedule_once(lambda dt,error=error:setattr(self.status,"text","Ошибка выбора файла: "+error),0)
 
     def _pem_file_result(self,request_code,result_code,intent):
         if request_code!=getattr(self,"_pem_request_code",8421):return
@@ -96,13 +97,17 @@ class LicenseAdmin(App):
 
     def _apply_selected_pem(self,pem):
         self.pem_input.text=pem
-        self.install_private_key()
+        self.status.text="PEM загружен. Нажмите УСТАНОВИТЬ ПРИВАТНЫЙ КЛЮЧ."
 
     def install_private_key(self,*_):
         try:
             pem=self.pem_input.text.strip()
+            if not pem:
+                raise ValueError("Сначала выберите PEM-файл или вставьте его текст")
+            if "-----BEGIN RSA PRIVATE KEY-----" in pem:
+                raise ValueError("Это PKCS#1 (RSA PRIVATE KEY). Нужен PKCS#8 (BEGIN PRIVATE KEY). Конвертируйте через openssl pkcs8 -topk8 -nocrypt")
             if "-----BEGIN PRIVATE KEY-----" not in pem or "-----END PRIVATE KEY-----" not in pem:
-                raise ValueError("Нужен приватный RSA ключ PKCS#8 в формате PEM")
+                raise ValueError("Ожидается полный PEM PKCS#8 с BEGIN PRIVATE KEY и END PRIVATE KEY")
             from jnius import autoclass
             Base64=autoclass("android.util.Base64")
             KeyFactory=autoclass("java.security.KeyFactory")
@@ -110,6 +115,7 @@ class LicenseAdmin(App):
             body="".join(line.strip() for line in pem.splitlines() if not line.startswith("-----"))
             raw=Base64.decode(body,Base64.DEFAULT)
             KeyFactory.getInstance("RSA").generatePrivate(PKCS8(raw))
+            self.data_dir.mkdir(parents=True, exist_ok=True)
             self.keyfile.write_text(pem+"\n",encoding="ascii")
             self.pem_input.text=""
             self.status.text="Приватный RSA-ключ установлен. Можно выдавать лицензии."
