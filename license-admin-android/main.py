@@ -23,6 +23,13 @@ class LicenseAdmin(App):
         self.customer=TextInput(hint_text="Покупатель / имя",multiline=False,size_hint_y=None,height=dp(44))
         self.note=TextInput(hint_text="Примечание",multiline=False,size_hint_y=None,height=dp(44))
         root.add_widget(self.device);root.add_widget(self.customer);root.add_widget(self.note)
+        # Owner-only setup: paste the PEM into this app locally, never into GitHub.
+        if not self.keyfile.exists():
+            self.pem_input=TextInput(hint_text="Вставьте приватный ключ PEM (только один раз)",multiline=True,size_hint_y=None,height=dp(95))
+            root.add_widget(self.pem_input)
+            install=Button(text="УСТАНОВИТЬ ПРИВАТНЫЙ КЛЮЧ",size_hint_y=None,height=dp(44))
+            install.bind(on_release=self.install_private_key)
+            root.add_widget(install)
         b=Button(text="СОЗДАТЬ LIFETIME",size_hint_y=None,height=dp(48));b.bind(on_release=self.generate);root.add_widget(b)
         self.out=TextInput(readonly=True,hint_text="Здесь появится Lifetime ключ",size_hint_y=None,height=dp(130));root.add_widget(self.out)
         row=BoxLayout(size_hint_y=None,height=dp(44),spacing=dp(5))
@@ -34,6 +41,23 @@ class LicenseAdmin(App):
         self.history.bind(texture_size=lambda w,s:setattr(w,"height",s[1]))
         sc=ScrollView();sc.add_widget(self.history);root.add_widget(sc)
         return root
+    def install_private_key(self,*_):
+        try:
+            pem=self.pem_input.text.strip()
+            if "-----BEGIN PRIVATE KEY-----" not in pem or "-----END PRIVATE KEY-----" not in pem:
+                raise ValueError("Нужен приватный RSA ключ PKCS#8 в формате PEM")
+            from jnius import autoclass
+            Base64=autoclass("android.util.Base64")
+            KeyFactory=autoclass("java.security.KeyFactory")
+            PKCS8=autoclass("java.security.spec.PKCS8EncodedKeySpec")
+            body="".join(line.strip() for line in pem.splitlines() if not line.startswith("-----"))
+            raw=Base64.decode(body,Base64.DEFAULT)
+            KeyFactory.getInstance("RSA").generatePrivate(PKCS8(raw))
+            self.keyfile.write_text(pem+"\\n",encoding="ascii")
+            self.pem_input.text=""
+            self.status.text="Приватный RSA-ключ установлен. Можно выдавать лицензии."
+        except Exception as e:
+            self.status.text="Ошибка установки ключа: "+str(e)
     def b64(self,b):return base64.urlsafe_b64encode(b).decode().rstrip("=")
     def normalize_device(self,s):
         d="".join(ch for ch in s.upper() if ch in "0123456789ABCDEF")
