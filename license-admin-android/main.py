@@ -14,10 +14,12 @@ from kivy.clock import Clock
 from kivy.uix.screenmanager import ScreenManager, Screen
 from kivy.uix.gridlayout import GridLayout
 from kivy.utils import escape_markup
+from kivy.core.window import Window
 
 class LicenseAdmin(App):
     def build(self):
         self.title="Mazda6GH License Admin"
+
         self.data_dir=Path(self.user_data_dir)
         self.keyfile=self.data_dir/"owner_private.pem"
         self.logfile=self.data_dir/"issued_licenses.csv"
@@ -48,9 +50,11 @@ class LicenseAdmin(App):
         journal.bind(on_release=self.open_journal)
         root.add_widget(journal)
         self.manager=ScreenManager()
+        if platform=="android":
+            Window.bind(on_keyboard=self.on_android_back)
         main=Screen(name="main");main.add_widget(root)
         journal_screen=Screen(name="journal")
-        panel=BoxLayout(orientation="vertical",padding=dp(10),spacing=dp(8))
+        panel=BoxLayout(orientation="vertical",padding=[dp(10),dp(10),dp(10),dp(40)],spacing=dp(8))
         head=BoxLayout(size_hint_y=None,height=dp(48),spacing=dp(8))
         back=Button(text="НАЗАД",size_hint_x=.28)
         back.bind(on_release=lambda *_:setattr(self.manager,"current","main"))
@@ -62,6 +66,9 @@ class LicenseAdmin(App):
         panel.add_widget(self.search)
         self.journal_count=Label(size_hint_y=None,height=dp(30),font_size="13sp")
         panel.add_widget(self.journal_count)
+        export=Button(text="ЭКСПОРТ ВСЕГО ЖУРНАЛА (CSV)",size_hint_y=None,height=dp(46))
+        export.bind(on_release=self.export_journal)
+        panel.add_widget(export)
         sc=ScrollView(do_scroll_x=False)
         self.journal_rows=GridLayout(cols=1,spacing=dp(7),size_hint_y=None)
         self.journal_rows.bind(minimum_height=self.journal_rows.setter("height"))
@@ -69,6 +76,67 @@ class LicenseAdmin(App):
         journal_screen.add_widget(panel)
         self.manager.add_widget(main);self.manager.add_widget(journal_screen)
         return self.manager
+    def on_android_back(self,window,key,*args):
+        if key==27 and self.manager.current=="journal":
+            self.manager.current="main"
+            return True
+        return False
+    def export_journal(self,*_):
+        try:
+            rows=self.read_journal()
+            if not rows:
+                self.journal_count.text="Журнал пуст — экспортировать нечего"
+                return
+            self.data_dir.mkdir(parents=True,exist_ok=True)
+            name="licenses_export_"+datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")+".csv"
+            target=self.data_dir/name
+            with target.open("w",newline="",encoding="utf-8-sig") as f:
+                writer=csv.writer(f)
+                writer.writerow(["Дата UTC","Device ID","Email","Примечание / имя","Лицензия"])
+                for row in rows:
+                    writer.writerow([row.get("created_utc",""),row.get("device_id",""),row.get("customer",""),row.get("note",""),row.get("license","")])
+            if platform=="android":
+                from jnius import autoclass
+                from android import activity as android_activity
+                Intent=autoclass("android.content.Intent")
+                self._export_file=target
+                self._export_request_code=8422
+                android_activity.bind(on_activity_result=self._export_result)
+                intent=Intent(Intent.ACTION_CREATE_DOCUMENT)
+                intent.addCategory(Intent.CATEGORY_OPENABLE)
+                intent.setType("text/csv")
+                intent.putExtra(Intent.EXTRA_TITLE,name)
+                autoclass("org.kivy.android.PythonActivity").mActivity.startActivityForResult(intent,self._export_request_code)
+                self.journal_count.text="Выберите место сохранения CSV"
+            else:
+                self.journal_count.text="Экспорт: "+str(target)
+        except Exception as e:
+            self.journal_count.text="Ошибка экспорта: "+str(e)
+    def _export_result(self,request_code,result_code,intent):
+        if request_code!=getattr(self,"_export_request_code",8422):return
+        from android import activity as android_activity
+        android_activity.unbind(on_activity_result=self._export_result)
+        if result_code!=-1 or intent is None:
+            Clock.schedule_once(lambda dt:setattr(self.journal_count,"text","Экспорт отменён"),0)
+            return
+        try:
+            from jnius import autoclass
+            activity=autoclass("org.kivy.android.PythonActivity").mActivity
+            stream=activity.getContentResolver().openOutputStream(intent.getData())
+            try:
+                payload=self._export_file.read_bytes()
+                signed=autoclass("java.lang.Byte").TYPE
+                from jnius import jarray
+                chunk=jarray("b")(list((x if x<128 else x-256) for x in payload))
+                stream.write(chunk)
+                stream.flush()
+            finally:
+                stream.close()
+            Clock.schedule_once(lambda dt:setattr(self.journal_count,"text","CSV успешно сохранён"),0)
+        except Exception as e:
+            error=str(e)
+            Clock.schedule_once(lambda dt,error=error:setattr(self.journal_count,"text","Ошибка записи CSV: "+error),0)
+
     def open_journal(self,*_):
         self.refresh_journal()
         self.manager.current="journal"
